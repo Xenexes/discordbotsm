@@ -2,13 +2,12 @@ import discord4j.core.DiscordClient;
 
 import java.io.*;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class ServiceChecker {
-
-    private Boolean isRunning = false;
 
     private String serviceName;
 
@@ -17,120 +16,123 @@ public class ServiceChecker {
     }
 
     public Boolean checkIfServiceIsRunning() throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder();
+        ProcessBuilder pb = new ProcessBuilder("/usr/bin/bash", "-c", "service " + this.serviceName + " status");
+        pb.directory(new File(System.getProperty("user.home")));
+        Process proc = pb.start();
 
-        builder.command("/usr/bin/bash", "-c", "service " + this.serviceName + " status");
+        BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+        BufferedReader stdError = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
 
-        builder.directory(new File(System.getProperty("user.home")));
-        Process process = builder.start();
+        int exitCode = proc.waitFor();
 
-        this.isRunning = false;
-
-        Consumer<String> consumer = this::checkForMatch;
-
-        StreamGobbler streamGobbler =
-                new StreamGobbler(process.getInputStream(), consumer);
-        Executors.newSingleThreadExecutor().submit(streamGobbler);
-
-        int exitCode = process.waitFor();
-
-        while (!streamGobbler.hasFinished()) {
-            System.out.println("Waiting for process check ...");
-        }
+        boolean active = stdInput.lines().anyMatch(s -> s.contains("active (running)"));
+        stdInput.lines().forEach(System.out::println);
+        stdError.lines().forEach(System.out::println);
 
         assert exitCode == 0;
 
-
-
-        return this.isRunning;
+        return active;
     }
 
     public Boolean restartService() throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder();
+        ProcessBuilder pb = new ProcessBuilder("/usr/bin/bash", "-c", "sudo service " + this.serviceName + " restart");
+        pb.directory(new File(System.getProperty("user.home")));
+        Process proc = pb.start();
 
-        builder.command("/usr/bin/bash", "-c", "sudo service " + this.serviceName + " restart");
-        builder.directory(new File(System.getProperty("user.home")));
-        Process process = builder.start();
+        int exitCode = proc.waitFor();
 
-        StreamGobbler streamGobbler =
-                new StreamGobbler(process.getInputStream(), System.out::println);
-        Executors.newSingleThreadExecutor().submit(streamGobbler);
+        BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+        BufferedReader stdError = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
 
-        int exitCode = process.waitFor();
+        stdInput.lines().forEach(System.out::println);
+        stdError.lines().forEach(System.out::println);
+
         assert exitCode == 0;
-
-        this.isRunning = false;
 
         Thread.sleep(20 * 1000);
 
         int retryCounter = 0;
-        while (!this.isRunning && retryCounter <= 10) {
-            this.isRunning = this.checkIfServiceIsRunning();
+        boolean isRunning = false;
+        while (!isRunning && retryCounter <= 10) {
+            isRunning = this.checkIfServiceIsRunning();
             Thread.sleep(5 * 1000);
             retryCounter++;
         }
 
-        return this.isRunning;
+        return isRunning;
     }
 
     public Boolean stopService() throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder();
+        ProcessBuilder pb = new ProcessBuilder("/usr/bin/bash", "-c", "service " + this.serviceName + " stop");
+        pb.directory(new File(System.getProperty("user.home")));
+        Process proc = pb.start();
 
-        builder.command("/usr/bin/bash", "-c", "sudo service " + this.serviceName + " stop");
-        builder.directory(new File(System.getProperty("user.home")));
-        Process process = builder.start();
+        int exitCode = proc.waitFor();
 
-        StreamGobbler streamGobbler =
-                new StreamGobbler(process.getInputStream(), System.out::println);
-        Executors.newSingleThreadExecutor().submit(streamGobbler);
+        BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+        BufferedReader stdError = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
 
-        int exitCode = process.waitFor();
+        stdInput.lines().forEach(System.out::println);
+        stdError.lines().forEach(System.out::println);
+
         assert exitCode == 0;
-
-        this.isRunning = true;
 
         Thread.sleep(20 * 1000);
 
         int retryCounter = 0;
-        while (this.isRunning && retryCounter <= 10) {
-            this.isRunning = this.checkIfServiceIsRunning();
+        boolean isRunning = false;
+        while (isRunning && retryCounter <= 10) {
+            isRunning = this.checkIfServiceIsRunning();
             Thread.sleep(5 * 1000);
             retryCounter++;
         }
 
-        return this.isRunning;
+        return isRunning;
     }
 
-    private void checkForMatch(String s) {
-        if (!this.isRunning) {
-            this.isRunning = s.contains("active (running)");
+/*
+    public static String execCmdSync(String cmd, CmdExecResult callback) throws java.io.IOException, InterruptedException {
+        RLog.i(TAG, "Running command:", cmd);
+
+        Runtime rt = Runtime.getRuntime();
+        Process proc = rt.exec(cmd);
+
+        //String[] commands = {"system.exe", "-get t"};
+
+        BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+        BufferedReader stdError = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
+
+        StringBuffer stdOut = new StringBuffer();
+        StringBuffer errOut = new StringBuffer();
+
+        // Read the output from the command:
+        System.out.println("Here is the standard output of the command:\n");
+        String s = null;
+        while ((s = stdInput.readLine()) != null) {
+            System.out.println(s);
+            stdOut.append(s);
         }
+
+        // Read any errors from the attempted command:
+        System.out.println("Here is the standard error of the command (if any):\n");
+        while ((s = stdError.readLine()) != null) {
+            System.out.println(s);
+            errOut.append(s);
+        }
+
+        if (callback == null) {
+            return stdInput.toString();
+        }
+
+        int exitVal = proc.waitFor();
+        callback.onComplete(exitVal == 0, exitVal, errOut.toString(), stdOut.toString(), cmd);
+
+        return stdInput.toString();
     }
 
-    /**
-     * Hook into the input and output streams of a process
-     */
-    private static class StreamGobbler implements Runnable {
-        private InputStream inputStream;
-        private Consumer<String> consumer;
-        private boolean finished = false;
-
-        public StreamGobbler(InputStream inputStream, Consumer<String> consumer) {
-            this.inputStream = inputStream;
-            this.consumer = consumer;
-        }
-
-        @Override
-        public void run() {
-            this.finished = false;
-
-           new BufferedReader(new InputStreamReader(inputStream)).lines().forEach(consumer);
-
-            this.finished = true;
-        }
-
-        public boolean hasFinished() {
-            return finished;
-        }
+    public interface CmdExecResult{
+        void onComplete(boolean success, int exitVal, String error, String output, String originalCmd);
     }
+
+ */
 }

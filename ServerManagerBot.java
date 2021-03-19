@@ -6,6 +6,7 @@
 //JAVA 11+
 
 import discord4j.common.util.Snowflake;
+import discord4j.core.event.domain.lifecycle.ReadyEvent;
 import discord4j.core.object.entity.User;
 import discord4j.core.object.entity.channel.Channel;
 import discord4j.core.object.entity.channel.TextChannel;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.annotation.Nullable;
 
 import java.io.*;
+import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -98,7 +100,7 @@ public class ServerManagerBot implements Callable<Integer> {
                 System.err.println("No channel ID for the bot has been entered, quitting ...");
                 return 0;
             } else {
-                System.out.println("Bod chnnel ID: " + this.serverChannelId);
+                System.out.println("Bot chnnel ID: " + this.serverChannelId);
             }
         } else {
             System.err.println("mode: slave");
@@ -155,15 +157,15 @@ public class ServerManagerBot implements Callable<Integer> {
                             } else {
                                 if (STATUS_SERVER_COMMAND.equals(message.getContent())) {
                                     final MessageChannel channel = message.getChannel().block();
-                                    channel.createMessage("Starting server ...").block();
+                                    channel.createMessage("Checking server status ...").block();
 
                                     try {
                                         Boolean isRunning = serviceChecker.checkIfServiceIsRunning();
 
                                         if (isRunning) {
-                                            channel.createMessage("Service is running!");
+                                            channel.createMessage("Service is running!").block();
                                         } else {
-                                            channel.createMessage("Service is not running!");
+                                            channel.createMessage("Service is not running!").block();
                                         }
                                     } catch (Exception ex) {
                                         channel.createMessage("Error on reading service status ...").block();
@@ -219,14 +221,20 @@ public class ServerManagerBot implements Callable<Integer> {
 
     private void initialServiceCheck(GatewayDiscordClient gateway, ServiceChecker serviceChecker) {
         try {
-            Snowflake id = Snowflake.of(Long.parseLong(this.serverChannelId));
             Boolean isRunning = serviceChecker.checkIfServiceIsRunning();
+            Snowflake id = Snowflake.of(Long.parseLong(this.serverChannelId));
 
             String message = "Service is running!";
             if (!isRunning) {
                 message = "Service is not running!";
             }
-            this.sendAutoMessage(gateway, id, message);
+
+            String finalMessage = message;
+            gateway.getEventDispatcher().on(ReadyEvent.class)
+                    .subscribe(event -> {
+                        GatewayDiscordClient client = event.getClient();
+                        this.sendAutoMessage(client, id, finalMessage);
+                    });
 
         } catch (IOException | InterruptedException e) {
             System.err.println("Failed to start master bot: " + e);
