@@ -35,9 +35,10 @@ public class ServerManagerBot implements Callable<Integer> {
 
     private static final String RESTART_SERVER_COMMAND = "!server restart";
 
+    private static final String HELP_SERVER_COMMAND = "!help";
+
     private final String START_SERVER_COMMAND = "!server start";
 
-    //@Parameters(index = "0", description = "Discord bot token.")
     @Option(names = {"-t", "--token", "-token"}, description = "Ip of the server to WOL")
     private String discordToken;
 
@@ -50,10 +51,10 @@ public class ServerManagerBot implements Callable<Integer> {
     @Option(names = {"-mac", "--mac"}, description = "MAC of the server to WOL")
     private String mac;
 
-    @Option(names = {"-s", "--service", "-service"}, description = "Name of the service to start.", defaultValue = "valheimserver")
+    @Option(names = {"-s", "--service", "-service"}, description = "Name of the service to start.")
     private String serviceName;
 
-    @Option(names = {"-ci", "--channelId", "-channelId"}, description = "Channel ID for the bot and handling of the server.", defaultValue = "821824110412693564")
+    @Option(names = {"-ci", "--channelId", "-channelId"}, description = "Channel ID for the bot and handling of the server.")
     private String serverChannelId;
 
     @Option(names = {"-bs", "--backupScript", "-backupScript"}, description = "Full path to the backup script ( /user/home/USER/backkup.sh ). If unset no backup will be executed.")
@@ -70,9 +71,18 @@ public class ServerManagerBot implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        if (validateBotParameters()) {
+            this.initBot();
+        }
+        return 0;
+    }
+
+    private boolean validateBotParameters() {
+        boolean valid = true;
+
         if (this.discordToken == null || this.discordToken.isBlank()) {
             System.err.println("No discord token, quitting ...");
-            return 0;
+            valid = false;
         } else {
             System.out.println("Bot token: " + this.discordToken);
         }
@@ -90,12 +100,12 @@ public class ServerManagerBot implements Callable<Integer> {
 
             if (this.serviceName == null || this.serviceName.isBlank()) {
                 System.err.println("No service name to start, quitting ...");
-                return 0;
+                valid = false;
             }
 
             if (this.serverChannelId == null || this.serverChannelId.isBlank()) {
                 System.err.println("No channel ID for the bot has been entered, quitting ...");
-                return 0;
+                valid = false;
             } else {
                 System.out.println("Bot chnnel ID: " + this.serverChannelId);
             }
@@ -108,7 +118,7 @@ public class ServerManagerBot implements Callable<Integer> {
                     System.out.println("Backup script: " + this.backupScript);
                 } else {
                     System.err.println("Backup script is not valid!");
-                    return 0;
+                    valid = false;
                 }
             }
         } else {
@@ -116,22 +126,20 @@ public class ServerManagerBot implements Callable<Integer> {
 
             if (!this.isIpV4Valid(this.ip)) {
                 System.err.println("No valid server IP, quitting ...");
-                return 0;
+                valid = false;
             } else {
                 System.out.println("Server MAC: " + this.ip);
             }
 
             if (!this.isValidMAC(this.mac)) {
                 System.err.println("No valid server MAC, quitting ...");
-                return 0;
+                valid = false;
             } else {
                 System.out.println("Server MAC: " + this.mac);
             }
         }
 
-        this.initBot();
-
-        return 0;
+        return valid;
     }
 
     private void initBot() {
@@ -149,6 +157,11 @@ public class ServerManagerBot implements Callable<Integer> {
                             final Message message = event.getMessage();
 
                             if (!this.master) {
+
+                                // TODO: STATUS_SERVER_COMMAND -> ping server and if offeline send messagge
+
+                                // TODO: STOP_SERVER_COMMAND -> ping server until offline + timeout / retries
+
                                 if (START_SERVER_COMMAND.equals(message.getContent())) {
                                     final MessageChannel channel = message.getChannel().block();
                                     channel.createMessage("Starting server ...").block();
@@ -161,7 +174,18 @@ public class ServerManagerBot implements Callable<Integer> {
                                         channel.createMessage("Failed to start the server ...").block();
                                     }
 
-                                    channel.createMessage("Waiting for game service start ...").block();
+                                    channel.createMessage("Waiting for server and its service start ...").block();
+                                } else if (HELP_SERVER_COMMAND.equals(message.getContent())) {
+                                    final MessageChannel channel = message.getChannel().block();
+
+                                    String help = "Executable commands:\n\n" +
+                                            "'!server status' -> Check if Service is running.\n" +
+                                            "'!server start' -> Start service on server.\n" +
+                                            "'!server restart' -> Restart service on server.\n" +
+                                            "'!server stop' -> Stop service on server, execute backup and shutdown server.\n" +
+                                            "'!server help' -> List available bit commands.\n";
+
+                                    channel.createMessage(help).block();
                                 }
                             } else {
                                 if (STATUS_SERVER_COMMAND.equals(message.getContent())) {
@@ -207,7 +231,7 @@ public class ServerManagerBot implements Callable<Integer> {
 
                                         channel.createMessage("Backup has been created ...").block();
 
-                                        channel.createMessage("Stopping game server ...").block();
+                                        channel.createMessage("Stopping server ...").block();
 
                                         try {
                                             ssh.shutdownServer();
