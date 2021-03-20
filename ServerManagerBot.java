@@ -2,20 +2,17 @@
 //DEPS com.discord4j:discord4j-core:3.1.3
 //DEPS info.picocli:picocli:4.5.0
 //DEPS commons-validator:commons-validator:1.7
-//SOURCES WakeOnLan.java ServiceChecker.java
+//SOURCES WakeOnLan.java SystemServiceHandler.java BackupScriptExecutor.java
 //JAVA 11+
 
 import discord4j.common.util.Snowflake;
 import discord4j.core.event.domain.lifecycle.ReadyEvent;
-import discord4j.core.object.entity.User;
 import discord4j.core.object.entity.channel.Channel;
 import discord4j.core.object.entity.channel.TextChannel;
-import discord4j.core.spec.EmbedCreateSpec;
 import org.apache.commons.validator.routines.InetAddressValidator;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Parameters;
 
 import discord4j.core.DiscordClient;
 import discord4j.core.GatewayDiscordClient;
@@ -23,14 +20,9 @@ import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.channel.MessageChannel;
 import reactor.core.publisher.Mono;
-import reactor.util.annotation.Nullable;
 
 import java.io.*;
-import java.time.Duration;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
-import java.util.function.Consumer;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Command(name = "smb", mixinStandardHelpOptions = true, version = "0.1",
@@ -64,7 +56,12 @@ public class ServerManagerBot implements Callable<Integer> {
     @Option(names = {"-ci", "--channelId", "-channelId"}, description = "Channel ID for the bot and handling of the server.", defaultValue = "821824110412693564")
     private String serverChannelId;
 
+    @Option(names = {"-bs", "--backupScript", "-backupScript"}, description = "Full path to the backup script ( /user/home/USER/backkup.sh ). If unset no backup will be executed.")
+    private String backupScript;
+
     private final InetAddressValidator validator = InetAddressValidator.getInstance();
+
+    private BackupScriptExecutor bse;
 
     public static void main(final String[] args) {
         int exitCode = new CommandLine(new ServerManagerBot()).execute(args);
@@ -83,11 +80,11 @@ public class ServerManagerBot implements Callable<Integer> {
         if (this.master) {
             System.err.println("mode: master");
 
-            if (this.ip != null || this.ip.isBlank()) {
+            if (this.ip != null) {
                 System.out.println("Server IP: Is ignored, running in master mode!");
             }
 
-            if (this.mac != null || this.mac.isBlank()) {
+            if (this.mac != null) {
                 System.out.println("Server MAC: Is ignored, running in master mode!");
             }
 
@@ -101,6 +98,18 @@ public class ServerManagerBot implements Callable<Integer> {
                 return 0;
             } else {
                 System.out.println("Bot chnnel ID: " + this.serverChannelId);
+            }
+
+            if (this.backupScript == null || this.backupScript.isBlank()) {
+                System.out.println("Backup script: No backup script defined! No Backup will be executed!!!");
+            } else {
+                this.bse = new BackupScriptExecutor(this.backupScript);
+                if (this.bse.isScriptValid()) {
+                    System.out.println("Backup script: " + this.backupScript);
+                } else {
+                    System.err.println("Backup script is not valid!");
+                    return 0;
+                }
             }
         } else {
             System.err.println("mode: slave");
@@ -129,10 +138,10 @@ public class ServerManagerBot implements Callable<Integer> {
         final DiscordClient client = DiscordClient.create(this.discordToken);
         final GatewayDiscordClient gateway = client.login().block();
 
-        ServiceChecker serviceChecker = new ServiceChecker(this.serviceName);
+        SystemServiceHandler ssh = new SystemServiceHandler(this.serviceName);
 
         if (this.master) {
-            initialServiceCheck(gateway, serviceChecker);
+            initialServiceCheck(gateway, ssh);
         }
 
         gateway.on(MessageCreateEvent.class)
@@ -160,7 +169,7 @@ public class ServerManagerBot implements Callable<Integer> {
                                     channel.createMessage("Checking server status ...").block();
 
                                     try {
-                                        Boolean isRunning = serviceChecker.checkIfServiceIsRunning();
+                                        Boolean isRunning = ssh.isRunning();
 
                                         if (isRunning) {
                                             channel.createMessage("Service is running!").block();
@@ -174,23 +183,39 @@ public class ServerManagerBot implements Callable<Integer> {
                                     final MessageChannel channel = message.getChannel().block();
                                     channel.createMessage("Stopping service ...").block();
 
-                                    Boolean isRunning = false;
+                                    Boolean isRunning = true;
                                     try {
-                                        isRunning = serviceChecker.stopService();
+                                        isRunning = ssh.stopService();
                                     } catch (Exception ex) {
-                                        System.out.println("Failed to restart service: " + ex);
+                                        System.out.println("Failed to stop service!");
                                         ex.printStackTrace();
-                                        channel.createMessage("Failed to restart service ...").block();
+                                        channel.createMessage("Failed to stop service ...").block();
                                     }
 
                                     if (!isRunning) {
                                         channel.createMessage("Service has been stoped ...").block();
 
-                                        // TODO:
-                                        channel.createMessage("Creating service backup ...").block();
+                                        channel.createMessage("Creating backup ...").block();
 
-                                        // TODO:
+                                        try {
+                                            this.bse.executeBackkup();
+                                        } catch (IOException | InterruptedException e) {
+                                            channel.createMessage("Backup failed!").block();
+                                            System.out.println("Backup failed!");
+                                            e.printStackTrace();
+                                        }
+
+                                        channel.createMessage("Backup has been created ...").block();
+
                                         channel.createMessage("Stopping game server ...").block();
+
+                                        try {
+                                            ssh.shutdownServer();
+                                        } catch (IOException | InterruptedException ex) {
+                                            channel.createMessage("Server shutdown failed ...").block();
+                                            System.out.println("Server shutdown failed!");
+                                            ex.printStackTrace();
+                                        }
 
                                     } else {
                                         channel.createMessage("Stopping service failed ...").block();
@@ -201,9 +226,9 @@ public class ServerManagerBot implements Callable<Integer> {
 
                                     Boolean isRunning = false;
                                     try {
-                                        isRunning = serviceChecker.restartService();
+                                        isRunning = ssh.restartService();
                                     } catch (Exception ex) {
-                                        System.out.println("Failed to restart service: " + ex);
+                                        System.out.println("Failed to restart service!");
                                         ex.printStackTrace();
                                         channel.createMessage("Failed to restart service ...").block();
                                     }
@@ -219,9 +244,9 @@ public class ServerManagerBot implements Callable<Integer> {
         gateway.onDisconnect().block();
     }
 
-    private void initialServiceCheck(GatewayDiscordClient gateway, ServiceChecker serviceChecker) {
+    private void initialServiceCheck(GatewayDiscordClient gateway, SystemServiceHandler serviceChecker) {
         try {
-            Boolean isRunning = serviceChecker.checkIfServiceIsRunning();
+            Boolean isRunning = serviceChecker.isRunning();
             Snowflake id = Snowflake.of(Long.parseLong(this.serverChannelId));
 
             String message = "Service is running!";
@@ -236,9 +261,9 @@ public class ServerManagerBot implements Callable<Integer> {
                         this.sendAutoMessage(client, id, finalMessage);
                     });
 
-        } catch (IOException | InterruptedException e) {
-            System.err.println("Failed to start master bot: " + e);
-            e.printStackTrace();
+        } catch (IOException | InterruptedException ex) {
+            System.err.println("Failed to start master bot!");
+            ex.printStackTrace();
         }
     }
 
