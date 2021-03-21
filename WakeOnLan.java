@@ -33,6 +33,7 @@ public class WakeOnLan {
             for (int i = 0; i < 6; i++) {
                 bytes[i] = (byte) 0xff;
             }
+
             for (int i = 6; i < bytes.length; i += macBytes.length) {
                 System.arraycopy(macBytes, 0, bytes, i, macBytes.length);
             }

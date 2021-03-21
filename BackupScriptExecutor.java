@@ -1,6 +1,4 @@
 import java.io.*;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Paths;
 
 public class BackupScriptExecutor {
 

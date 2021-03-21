@@ -39,16 +39,16 @@ public class ServerManagerBot implements Callable<Integer> {
 
     private final String START_SERVER_COMMAND = "!server start";
 
-    @Option(names = {"-t", "--token", "-token"}, description = "Ip of the server to WOL")
+    @Option(names = {"-t", "--token", "-token"}, description = "Discord bot token.")
     private String discordToken;
 
-    @Option(names = {"-m", "--master", "-master"}, description = "Defines if bot ist master or slave. If set bot starts in master mode.", defaultValue = "false")
+    @Option(names = {"-m", "--master", "-master"}, description = "Defines if bot ist master or slave. If set, bot starts in master mode.", defaultValue = "false")
     private Boolean master;
 
-    @Option(names = {"-ip", "--ip"}, description = "IP of the server to WOL")
+    @Option(names = {"-ip", "--ip"}, description = "IP of the server to Wol.")
     private String ip;
 
-    @Option(names = {"-mac", "--mac"}, description = "MAC of the server to WOL")
+    @Option(names = {"-mac", "--mac"}, description = "MAC of the server to Wol.")
     private String mac;
 
     @Option(names = {"-s", "--service", "-service"}, description = "Name of the service to start.")
@@ -107,7 +107,7 @@ public class ServerManagerBot implements Callable<Integer> {
                 System.err.println("No channel ID for the bot has been entered, quitting ...");
                 valid = false;
             } else {
-                System.out.println("Bot chnnel ID: " + this.serverChannelId);
+                System.out.println("Bot channel ID: " + this.serverChannelId);
             }
 
             if (this.backupScript == null || this.backupScript.isBlank()) {
@@ -170,7 +170,8 @@ public class ServerManagerBot implements Callable<Integer> {
                                         WakeOnLan wakeOnLan = new WakeOnLan();
                                         wakeOnLan.wakeUpServer(ip, mac);
                                     } catch (Exception ex) {
-                                        System.out.println("Failed to send WoL packet to " + ip + " " + mac + ": " + ex);
+                                        System.out.println("Failed to send WoL package:");
+                                        ex.printStackTrace();
                                         channel.createMessage("Failed to start the server ...").block();
                                     }
 
@@ -183,7 +184,7 @@ public class ServerManagerBot implements Callable<Integer> {
                                             "'!server start' -> Start service on server.\n" +
                                             "'!server restart' -> Restart service on server.\n" +
                                             "'!server stop' -> Stop service on server, execute backup and shutdown server.\n" +
-                                            "'!server help' -> List available bit commands.\n";
+                                            "'!server help' -> List available bit commands.\n\n";
 
                                     channel.createMessage(help).block();
                                 }
@@ -201,6 +202,7 @@ public class ServerManagerBot implements Callable<Integer> {
                                             channel.createMessage("Service is not running!").block();
                                         }
                                     } catch (Exception ex) {
+                                        ex.printStackTrace();
                                         channel.createMessage("Error on reading service status ...").block();
                                     }
                                 } else if (STOP_SERVER_COMMAND.equals(message.getContent())) {
@@ -223,10 +225,10 @@ public class ServerManagerBot implements Callable<Integer> {
 
                                         try {
                                             this.bse.executeBackkup();
-                                        } catch (IOException | InterruptedException e) {
+                                        } catch (IOException | InterruptedException ex) {
                                             channel.createMessage("Backup failed!").block();
                                             System.out.println("Backup failed!");
-                                            e.printStackTrace();
+                                            ex.printStackTrace();
                                         }
 
                                         channel.createMessage("Backup has been created ...").block();
